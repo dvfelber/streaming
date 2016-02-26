@@ -1,0 +1,142 @@
+\documentclass{article}
+\nonstopmode
+
+
+
+%%% Packages %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\RequirePackage{textcomp}
+\RequirePackage{latexsym}
+\RequirePackage{amstext}
+\RequirePackage{amsmath}
+\RequirePackage{amssymb}
+\RequirePackage{amsthm}
+\usepackage{fullpage}
+\usepackage[hidelinks]{hyperref}
+
+
+
+%%% Theorem types %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{fact}[theorem]{Fact}
+
+
+
+%%% Typography %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\def\labelitemi{\textbullet}
+\def\labelitemii{\textopenbullet}
+\def\labelitemiii{\textbullet}
+\def\labelitemiv{\textopenbullet}
+
+
+
+%%% Standard definitions and commands. Link or copy file into directory. %%%%%%%
+
+\input{stddef.tex}
+
+
+
+%%% Document-specific definitions and commands %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    %%% Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% \def\Low{\text{Low}}
+
+    %%% Commands %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newcommand{\D}[1]{D\p{#1}}
+
+
+\newcommand{\rank}[2]{R\p{#1,#2}}
+\newcommand{\rhat}[2]{\hat{R}\p{#1,#2}}
+\newcommand{\rhats}[2]{\hat{R}_S\p{#1,#2}}
+\newcommand{\rhatg}[2]{\hat{R}_G\p{#1,#2}}
+
+\newcommand{\eva}[1]{\alpha_{#1}}
+\newcommand{\evb}[1]{\beta_{#1}}
+
+
+
+%%% Document data %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\title{Implementation note for ``A randomized online quantile summary in
+  $\OO{\frac{1}{\ep} \log \frac{1}{\ep}}$ words''\footnote{Felber, David, and
+    Rafail Ostrovsky. "A Randomized Online Quantile Summary in O(1/epsilon* log
+    (1/epsilon)) Words." LIPIcs-Leibniz International Proceedings in
+    Informatics. Vol. 40. Schloss Dagstuhl-Leibniz-Zentrum fuer Informatik,
+    2015.}}
+
+\author{David Felber}
+\date{February 25, 2016}
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+
+\maketitle
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The bound in the referenced paper does not have particularly good constants.
+This note improves those constants for common values of $\ep$ and $\delta$ (on
+the order of $10^{-\p{1,2,3}}$). Since it references definitions and arguments
+in the paper, it's unlikely to make much sense if you haven't read the paper.
+
+\paragraph{Approach}
+The main difference in the approach in this note and the one in the paper is
+that we use mean deviation to bound the approximation error and then use
+Markov's inequality to reduce the error probability to less than 1. Then, we run
+$\OO{\logp{1/\delta}}$ copies in parallel, and on any query, we query all the
+copies and return the median. This brings the probability of an incorrect query
+response down to $\delta$.
+
+\paragraph{Implementation}
+We use a slightly different implementation. Here, row $i$ receives items up to
+$2^i m$, so that row $0$ sees items $1 \ldots m$, row $1$ sees items $\p{m \pl
+  1} \ldots 2m$, etc. We sample at rate $2^{-i}$, and fix each GK summary to
+accept at most $2m$ items. In this note we assume that the probability that any
+GK summary is ever offered more items is negligible.
+
+\paragraph{Approximation}
+The mean deviation $\D{u}$ for a variable $u$ is $E\abs{u - Eu}$. For $i \ge 1$,
+we have that $\rank{y}{S_i}$ is distributed as $\text{Binomial}\p{n =
+  \rank{y}{J_i}, p = 2^{-5-i}}$. Berend and Kontorovich state\footnote{Berend,
+  Daniel, and Aryeh Kontorovich. "A sharp estimate of the binomial mean absolute
+  deviation with applications." Statistics \& Probability Letters 83.4 (2013):
+  1254-1259.} that for a $\text{Binomial}\p{n,p}$ variable the mean deviation is
+at most the standard deviation, $\p{np\p{1-p}}$, which in our case we can bound
+by $2^{-i/2} \rank{y}{J_i}^{1/2}$. Further, we know that $\rank{y}{J_i}^{1/2}
+\le 2^i m$, so we can write $\D{\rank{y}{J_i}} \le 2^{i/2} m^{1/2}$.
+
+Our internal GK summaries must use a finer approximation; we have them use an
+error parameter $\ep/\alpha$, for some $\alpha > 1$. This means that
+$\rank{y}{R_i} = \rank{y}{J_i} + z_i$ for some $\abs{z_i} \le 2^i \ep m /
+\alpha$, from which we derive that $\D{\rank{y}{J_{i+1}} - \rank{y}{J_i}} \le
+2^i \ep m / \alpha + 2^{i/2} m^{1/2}$. Summed over $i = 0 \ldots k$, where $k$
+is the last full row, we get $\D{\rank{y}{J_{k+1}} - \rank{y}{J_0}} \le 2^{k+1}
+\ep m / \alpha + 2^{\p{k+1}/2} m^{1/2}$.
+
+\paragraph{Probability}
+In order to use Markov's inequality to bound the failure probability to
+$1/\beta$, we want
+\begin{align*}
+  \D{\rank{y}{J_{k+1}} - \rank{y}{J_0}} \le 2^k \ep m / \beta
+\end{align*}
+This means we want
+\begin{align*}
+  2^{k+1} \ep m / \alpha + 2^{\p{k+1}/2} m^{1/2} \le 2^k \ep m / \beta
+\end{align*}
+If we assume that $2^{\p{k+1}/2} \ep m^{1/2} / \alpha \ge 1$, then $\alpha \ge 2
+\beta$ suffices. So if we take $\beta = 2$ (as we do in the code) then $\alpha =
+4$ and $m = \p{\alpha / 2 \ep}^2 = 4 / \ep^2$ suffice.
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}
+
+% Copyright 2016 David Felber.
